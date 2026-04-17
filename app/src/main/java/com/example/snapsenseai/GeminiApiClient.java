@@ -1,6 +1,7 @@
 package com.example.snapsenseai;
 
 import android.util.Log;
+import org.json.JSONArray;
 import org.json.JSONObject;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -9,81 +10,81 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public class GeminiApiClient {
-    private static final String API_KEY = "AIzaSyB2-M4B_VbHKVylGBx3y_ZNlcoetoaIr4U"; // Replace with your key
-    // The specific ID for the stable Flash-Lite model
-    // 1. Update the Model ID to the Gemini 3 Flash version
-    // 1. Revert to the Gemini 2.5 Flash identifier
-    private static final String MODEL = "gemini-2.5-flash";
+    private static final String API_KEY = "AIzaSyBz2xOuNpqHcU2-OA3_6g9C0ODqvN9OodA";
+    // 1. Updated Model ID for the Lite version
+    private static final String MODEL = "gemini-2.5-flash-lite";
 
-    // 2. The URL must target the v1beta endpoint for this model
+    // 2. The URL will automatically use the new 'lite' string
     private static final String URL = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent?key=" + API_KEY;
 
     public interface GeminiCallback {
-        void onSuccess(String category, int ttlHours, String suggestedName);
+        // Updated: Now includes date and time for Phase 6 Calendar integration
+        void onSuccess(String category, int ttlHours, String suggestedName, String eventDate, String eventTime);
         void onFailure(Exception e);
     }
 
     public void classifyContent(String redactedText, GeminiCallback callback) {
         new Thread(() -> {
             try {
-                // Increase timeout to 30 seconds for slow campus/mobile networks
                 OkHttpClient client = new OkHttpClient.Builder()
                         .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                         .build();
 
-                // Refined prompt for rigid JSON output
-                String prompt = "Analyze this redacted screenshot text: '" + redactedText + "'. " +
-                        "Classify it into one category (Finance, Study, Social, Travel, or OTP). " +
-                        "Determine if it is 'Temporary' or 'Permanent'. If temporary, provide TTL in hours. " +
-                        "Suggest a short file name. Return ONLY valid JSON: " +
-                        "{\"category\": \"string\", \"ttl\": int, \"name\": \"string\"}";
+                // Phase 6 Updated Prompt: Specifically asking for ISO Date and Time
+                String prompt = "Analyze this redacted text: '" + redactedText + "'. " +
+                        "1. Classify: Finance, Study, Social, Travel, or OTP. " +
+                        "2. TTL: If temporary, provide hours. " +
+                        "3. Naming: Suggest a file name. " +
+                        "4. Calendar: If you see a movie/event date, extract it as YYYY-MM-DD and HH:mm. " +
+                        "Return ONLY JSON: {\"category\": \"string\", \"ttl\": int, \"name\": \"string\", \"date\": \"YYYY-MM-DD\", \"time\": \"HH:mm\"}. " +
+                        "If no date found, return null for date and time fields.";
 
                 JSONObject jsonBody = new JSONObject();
-                jsonBody.put("contents", new org.json.JSONArray().put(new JSONObject()
-                        .put("parts", new org.json.JSONArray().put(new JSONObject().put("text", prompt)))));
+                JSONObject part = new JSONObject().put("text", prompt);
+                JSONArray parts = new JSONArray().put(part);
+                JSONObject content = new JSONObject().put("parts", parts);
+                JSONArray contents = new JSONArray().put(content);
+                jsonBody.put("contents", contents);
 
                 RequestBody body = RequestBody.create(jsonBody.toString(), MediaType.parse("application/json"));
                 Request request = new Request.Builder().url(URL).post(body).build();
 
-                Log.d("SnapSense", "Sending request to Gemini API...");
-
                 try (Response response = client.newCall(request).execute()) {
-                    // LOG 1: The HTTP status code (200 is success, 403 is key error, 429 is limit)
-                    Log.d("SnapSense", "HTTP Response Code: " + response.code());
-
                     if (response.isSuccessful() && response.body() != null) {
                         String result = response.body().string();
-
-                        // LOG 2: The actual raw response from Google
-                        Log.d("SnapSense", "Raw Gemini Response: " + result);
-
                         parseGeminiResponse(result, callback);
                     } else {
-                        // LOG 3: Specific error message if the request failed
-                        String errorMsg = response.body() != null ? response.body().string() : "No error body";
-                        Log.e("SnapSense", "Server Error: " + response.message() + " | Body: " + errorMsg);
-                        callback.onFailure(new Exception("HTTP " + response.code() + ": " + response.message()));
+                        callback.onFailure(new Exception("HTTP " + response.code()));
                     }
                 }
             } catch (Exception e) {
-                // LOG 4: Catches networking errors like timeouts or DNS issues
-                Log.e("SnapSense", "Network/JSON Exception: " + e.getMessage());
                 callback.onFailure(e);
             }
         }).start();
     }
+
     private void parseGeminiResponse(String responseBody, GeminiCallback callback) {
         try {
-            // Simplified parsing for demonstration; in production, use GSON
             JSONObject json = new JSONObject(responseBody);
             String textResponse = json.getJSONArray("candidates")
                     .getJSONObject(0).getJSONObject("content")
                     .getJSONArray("parts").getJSONObject(0).getString("text");
 
-            JSONObject result = new JSONObject(textResponse.replace("```json", "").replace("```", ""));
-            callback.onSuccess(result.getString("category"), result.getInt("ttl"), result.getString("name"));
+            // Clean JSON markdown if present
+            String cleanedJson = textResponse.replaceAll("```json", "").replaceAll("```", "").trim();
+            JSONObject result = new JSONObject(cleanedJson);
+
+            // Phase 6: Extracting the new fields
+            String category = result.optString("category", "Miscellaneous");
+            int ttl = result.optInt("ttl", 24);
+            String name = result.optString("name", "Screenshot_" + System.currentTimeMillis());
+            String date = result.optString("date", null);
+            String time = result.optString("time", null);
+
+            callback.onSuccess(category, ttl, name, date, time);
         } catch (Exception e) {
+            Log.e("SnapSense", "Parsing Error: " + e.getMessage());
             callback.onFailure(e);
         }
     }

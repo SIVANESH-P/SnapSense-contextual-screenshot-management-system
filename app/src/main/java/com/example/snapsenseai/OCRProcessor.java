@@ -38,21 +38,35 @@ public class OCRProcessor {
                         // 2. Update Global Buffer
                         AnonymizedMetadataBuffer.getInstance().setBuffer(safeText);
 
-                        // 3. Trigger Phase 3: Semantic Cloud Classification
-                        Log.d("SnapSense", "Requesting AI Classification from Gemini Flash...");
+                        // 3. Trigger Phase 3 & Phase 6: Semantic Classification + Date Extraction
+                        Log.d("SnapSense", "Requesting AI Classification & Event Extraction...");
+
                         geminiClient.classifyContent(safeText, new GeminiApiClient.GeminiCallback() {
                             @Override
-                            public void onSuccess(String category, int ttlHours, String suggestedName) {
-                                // 1. Move and Rename first (Phase 4)
+                            public void onSuccess(String category, int ttlHours, String suggestedName, String eventDate, String eventTime) {
+                                // Phase 4: Move and Rename
                                 fileOrganizer.moveAndRename(imageUri, category, suggestedName);
 
-                                // 2. Prepare data for the Worker
+                                // --- PHASE 6: UPDATED CALENDAR NOTIFICATION LOGIC ---
+                                if (eventDate != null && !eventDate.isEmpty() && !eventDate.equalsIgnoreCase("null")) {
+                                    Log.d("SnapSense", "Event Detected: " + eventDate + " at " + eventTime);
+
+                                    // Bridge: If we are in the Service, send a notification
+                                    if (context instanceof SnapSenseService) {
+                                        ((SnapSenseService) context).sendCalendarNotification(suggestedName, eventDate, eventTime);
+                                    }
+                                    // If we are in the Activity (rare during background use), show dialog directly
+                                    else if (context instanceof MainActivity) {
+                                        ((MainActivity) context).showCalendarDialog(suggestedName, eventDate, eventTime);
+                                    }
+                                }
+
+                                // Phase 5: Schedule Deletion Lifecycle
                                 androidx.work.Data inputData = new androidx.work.Data.Builder()
                                         .putString("image_uri", imageUri.toString())
                                         .putString("file_name", suggestedName)
                                         .build();
 
-                                // 3. Create the WorkRequest with the AI's TTL
                                 androidx.work.OneTimeWorkRequest deleteWorkRequest =
                                         new androidx.work.OneTimeWorkRequest.Builder(DeleteWorker.class)
                                                 .setInitialDelay(ttlHours, java.util.concurrent.TimeUnit.HOURS)
@@ -60,10 +74,7 @@ public class OCRProcessor {
                                                 .addTag("SCREENSHOT_LIFECYCLE")
                                                 .build();
 
-                                // 4. Schedule it!
                                 androidx.work.WorkManager.getInstance(context).enqueue(deleteWorkRequest);
-
-                                Log.d("SnapSense", "Lifecycle Scheduled: Deletion prompt in " + ttlHours + " hours.");
                             }
 
                             @Override

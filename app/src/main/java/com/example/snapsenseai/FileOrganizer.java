@@ -23,12 +23,10 @@ public class FileOrganizer {
 
     public void moveAndRename(Uri sourceUri, String category, String newName) {
         try {
-            // Check if the category is recognized, else move to Miscellaneous
             String finalCategory = validCategories.contains(category) ? category : "Miscellaneous";
-
             ContentValues values = new ContentValues();
 
-            // Rename the file with a timestamp to ensure uniqueness
+            // Rename the file
             values.put(MediaStore.Images.Media.DISPLAY_NAME, newName + "_" + (System.currentTimeMillis() / 1000));
 
             // Set the new path under Pictures/SnapSenseAI/
@@ -36,7 +34,6 @@ public class FileOrganizer {
                 values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/SnapSenseAI/" + finalCategory);
             }
 
-            // Attempt to update the MediaStore (This triggers the move/rename)
             int rowsUpdated = context.getContentResolver().update(sourceUri, values, null, null);
 
             if (rowsUpdated > 0) {
@@ -44,26 +41,28 @@ public class FileOrganizer {
             }
 
         } catch (SecurityException securityException) {
-            // Handle Scoped Storage permission issue on Android 10+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                     securityException instanceof RecoverableSecurityException) {
 
                 RecoverableSecurityException recoverableException = (RecoverableSecurityException) securityException;
+                Log.d("SnapSense", "Scoped Storage restriction hit. Determining context...");
 
-                Log.d("SnapSense", "Scoped Storage restriction hit. Requesting user permission...");
-
-                // Create the IntentSenderRequest for the new Activity Result API
-                IntentSenderRequest intentSenderRequest = new IntentSenderRequest.Builder(
-                        recoverableException.getUserAction().getActionIntent().getIntentSender()).build();
-
-                // Call the helper method in MainActivity to launch the system dialog
+                // 1. Case: App is in Foreground (MainActivity)
                 if (context instanceof MainActivity) {
+                    IntentSenderRequest intentSenderRequest = new IntentSenderRequest.Builder(
+                            recoverableException.getUserAction().getActionIntent().getIntentSender()).build();
+
                     ((MainActivity) context).requestFilePermission(
                             intentSenderRequest,
                             sourceUri,
                             category,
                             newName
                     );
+                }
+                // 2. Case: App is in Background (SnapSenseService)
+                else if (context instanceof SnapSenseService) {
+                    Log.d("SnapSense", "In Service: Sending Permission Notification...");
+                    ((SnapSenseService) context).sendPermissionNotification(sourceUri, category, newName);
                 }
             } else {
                 Log.e("SnapSense", "Persistent Security Error: " + securityException.getMessage());
