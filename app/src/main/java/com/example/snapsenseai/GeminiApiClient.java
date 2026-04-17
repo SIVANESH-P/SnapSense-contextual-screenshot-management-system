@@ -10,7 +10,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 public class GeminiApiClient {
-    private static final String API_KEY = "AIzaSyBz2xOuNpqHcU2-OA3_6g9C0ODqvN9OodA";
+    private static final String API_KEY = "API_Key"; //Use the api key
     // 1. Updated Model ID for the Lite version
     private static final String MODEL = "gemini-2.5-flash-lite";
 
